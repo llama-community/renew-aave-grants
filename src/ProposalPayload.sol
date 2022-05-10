@@ -30,8 +30,8 @@ contract ProposalPayload {
     /// @notice Aave Collector V2 address.
     address private constant aaveCollector = 0x464C71f6c2F760DdA6093dCB91C24c39e5d6e18c;
 
-    // $3,000,000 / 104.18 (coingecko @ 5/7/2022 4:00pm EST)
-    uint256 private constant aaveAmount = 28796310000000000000000;
+    // $3,000,000 / 134.28 (coingecko avg opening price from 5/4-5/10)
+    uint256 private constant aaveAmount = 22341380000000000000000;
     uint256 private constant aUsdcAmount = 3000000000000;
 
     /// @notice The AAVE governance executor calls this function to implement the proposal.
