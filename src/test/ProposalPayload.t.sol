@@ -7,6 +7,7 @@ import "@std/console.sol";
 import {stdCheats} from "@std/stdlib.sol";
 import {Vm} from "@std/Vm.sol";
 import {DSTestPlus} from "@solmate/test/utils/DSTestPlus.sol";
+import {ERC20} from "@solmate/tokens/ERC20.sol";
 
 // contract dependencies
 import "../external/aave/IAaveGovernanceV2.sol";
@@ -20,6 +21,8 @@ contract ProposalPayloadTest is DSTestPlus, stdCheats {
 
     address private aaveGovernanceAddress = 0xEC568fffba86c094cf06b22134B23074DFE2252c;
     address private aaveGovernanceShortExecutor = 0xEE56e2B3D491590B5b31738cC34d5232F378a8D5;
+
+    address private llamaProposalAddress = 0x5B3bFfC0bcF8D4cAEC873fDcF719F60725767c98;
 
     IAaveGovernanceV2 private aaveGovernanceV2 = IAaveGovernanceV2(aaveGovernanceAddress);
     IExecutorWithTimelock private shortExecutor = IExecutorWithTimelock(aaveGovernanceShortExecutor);
@@ -38,6 +41,29 @@ contract ProposalPayloadTest is DSTestPlus, stdCheats {
     bytes32 private ipfsHash = 0x0;
 
     uint256 private proposalId;
+
+    /// @notice AaveEcosystemReserveController address.
+    IEcosystemReserveController private constant reserveController =
+        IEcosystemReserveController(0x3d569673dAa0575c936c7c67c4E6AedA69CC630C);
+
+    /// @notice aUSDC token.
+    ERC20 private constant aUsdc = ERC20(0xBcca60bB61934080951369a648Fb03DF4F96263C);
+
+    /// @notice AAVE token.
+    ERC20 private constant aave = ERC20(0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9);
+
+    /// @notice Aave Grants DAO multisig address.
+    address private constant aaveGrantsDaoMultisig = 0x89C51828427F70D77875C6747759fB17Ba10Ceb0;
+
+    /// @notice Aave Ecosystem Reserve address.
+    address private constant aaveEcosystemReserve = 0x25F2226B597E8F9514B3F68F00f494cF4f286491;
+
+    /// @notice Aave Collector V2 address.
+    address private constant aaveCollector = 0x464C71f6c2F760DdA6093dCB91C24c39e5d6e18c;
+
+    // $3,000,000 / 104.18 (coingecko @ 5/7/2022 4:00pm EST)
+    uint256 private constant aaveAmount = 28796310000000000000000;
+    uint256 private constant aUsdcAmount = 3000000000000;
 
     function setUp() public {
         // aave whales may need to be updated based on the block being used
@@ -59,10 +85,44 @@ contract ProposalPayloadTest is DSTestPlus, stdCheats {
         _skipQueuePeriod();
     }
 
-    function testExecute() public {
-        // Pre-execution assertations
+    function testAaveTransfer() public {
+        uint256 initialReserveBalance = 1777621264234247793724395;
+        assertEq(aave.balanceOf(aaveEcosystemReserve), initialReserveBalance);
+
+        uint256 initialMultisigBalance = 192379049942249419841;
+        assertEq(aave.balanceOf(aaveGrantsDaoMultisig), initialMultisigBalance);
+
         _executeProposal();
-        // Post-execution assertations
+
+        // Assert correct amount was transfered from reserve to multisig
+        assertEq(aave.balanceOf(aaveEcosystemReserve), initialReserveBalance - aaveAmount);
+        assertEq(aave.balanceOf(aaveGrantsDaoMultisig), initialMultisigBalance + aaveAmount);
+    }
+
+    function testAUsdcApproval() public {
+        uint256 initialMultisigAllowance = 0;
+        assertEq(aUsdc.allowance(aaveCollector, aaveGrantsDaoMultisig), initialMultisigAllowance);
+
+        _executeProposal();
+
+        // Assert correct amount was transfered from reserve to multisig
+        assertEq(aUsdc.allowance(aaveCollector, aaveGrantsDaoMultisig), initialMultisigAllowance + aUsdcAmount);
+    }
+
+    function testMultisigTransferFrom() public {
+        uint256 transferAmount = 15000000000;
+
+        vm.prank(aaveGrantsDaoMultisig);
+        vm.expectRevert("ERC20: transfer amount exceeds allowance");
+        aUsdc.transferFrom(aaveCollector, aaveGrantsDaoMultisig, transferAmount);
+
+        _executeProposal();
+
+        vm.prank(aaveGrantsDaoMultisig);
+        aUsdc.transferFrom(aaveCollector, aaveGrantsDaoMultisig, transferAmount);
+
+        assertEq(aUsdc.allowance(aaveCollector, aaveGrantsDaoMultisig), aUsdcAmount - transferAmount);
+        assertEq(aUsdc.balanceOf(aaveGrantsDaoMultisig), transferAmount);
     }
 
     function _executeProposal() public {
@@ -94,7 +154,7 @@ contract ProposalPayloadTest is DSTestPlus, stdCheats {
         calldatas.push(emptyBytes);
         withDelegatecalls.push(true);
 
-        vm.prank(aaveWhales[0]);
+        vm.prank(llamaProposalAddress);
         aaveGovernanceV2.create(shortExecutor, targets, values, signatures, calldatas, withDelegatecalls, ipfsHash);
         proposalId = aaveGovernanceV2.getProposalsCount() - 1;
     }
